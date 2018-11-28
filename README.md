@@ -1,6 +1,6 @@
 # FORK
 
-I fork this repository in order to add missing functionabilities. 
+I forked this repository in order to add missing functionabilities. 
 
 ```
 
