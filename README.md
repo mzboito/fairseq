@@ -1,10 +1,7 @@
 # FORK
 
-I forked this repository in order to add missing functionabilities. 
+I forked this repository in order to add missing functionabilities. The information from the original project follows.
 
-
-
-# Information from the original project:
 
 # Join the fairseq community
 
