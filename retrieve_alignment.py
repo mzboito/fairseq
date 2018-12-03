@@ -43,7 +43,6 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
             else:
                 write_attention_matrices(src_sentence, trg_sentence, coder_dict[layer][att_type], file_name)
 
-
 def write_attention_matrices(src_sentence, trg_sentence, matrix, path):
     src = [""] + src_sentence.split(" ") + ["</S>"]
     trg = trg_sentence.split(" ") + ["</S>"]
@@ -79,7 +78,7 @@ def main(args):
     ####1 ARGS SETTING
     assert args.path is not None, '--path required for generation!'
     assert args.root_directory is not None, '--root directory required for logging!'
-    use_cuda = torch.cuda.is_available() and not args.cpu
+    args.cpu = True
     args.score_reference = True
     args.print_alignment = True 
     args.max_sentences= 1 #--batch-size 1
@@ -99,24 +98,14 @@ def main(args):
     ####3 LOAD MODEL
     print('| loading model(s) from {}'.format(args.path))
     models, _ = utils.load_ensemble_for_inference(args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides))
-    '''
-    models, args = utils.load_ensemble_for_inference(args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides))
-    it returns the list of models, in our case: 
-        models: <class 'list'> 
-        models[0]: <class 'fairseq.models.transformer.TransformerModel'>
-    the second argument is the list of model's parameters (embedding size, number of heads, etc)
-    '''
     # Optimize ensemble for generation
     for model in models:
         model.make_generation_fast_(
             beamable_mm_beam_size=None if args.no_beamable_mm else args.beam,
-            need_attn=args.print_alignment, #!!
+            need_attn=args.print_alignment, 
         )
         if args.fp16:
             model.half()
-    # Load alignment dictionary for unknown word replacement
-    # (None if no unknown word replacement, empty if no path to align dictionary)
-    #align_dict = utils.load_align_dict(args.replace_unk)
 
     ####4 CREATE AN ITERATOR
     # Load dataset (possibly sharded)
@@ -130,50 +119,29 @@ def main(args):
         num_shards=args.num_shards,
         shard_id=args.shard_id,
     ).next_epoch_itr(shuffle=False)
-    '''
-    task.dataset(args.gen_subset): <fairseq.data.language_pair_dataset.LanguagePairDataset object at 0x7fdf4f505a90>
-    args.max_sentences: None
-    max_positions: (1024, 1024) ??????
-    RETURN itr: <class 'fairseq.data.iterators.CountingIterator'>
-    '''
 
     ####5 INIT GENERATOR
     gen_timer = StopwatchMeter()
     translator = SequenceScorer(models, task.target_dictionary)
-    if use_cuda:
-        translator.cuda()
-
-    #print(models[0])    
+  
     ####6 SCORING
-    # Generate and compute BLEU score
-    #scorer = bleu.Scorer(tgt_dict.pad(), tgt_dict.eos(), tgt_dict.unk())
-    #has_target = True
-    s = 0
     check_root(args.root_directory)
     src_gold = read_gold(args.gold_target)
-
     with progress_bar.build_progress_bar(args, itr) as t: #creates a progress bar, life goes on
-        translations = translator.score_batched_itr(t, cuda=use_cuda, timer=gen_timer)
+        translations = translator.score_batched_itr(t, cuda=False, timer=gen_timer)
         '''translations: <class 'generator'>
         just defines the generator,does not calculate stuff right here'''
         wps_meter = TimeMeter()
         for sample_id, src_tokens, target_tokens, hypos, acc_attentions in translations:
-            s+=1
             src_str = src_dict.string(src_tokens)
             target_str = tgt_dict.string(target_tokens, args.remove_bpe, escape_unk=True)
             if "unk" in src_str:
                 s_id = sample_id.item()
-                #print(src_str)
-                #print(src_dict[s_id])
                 assert len(src_str.split(" ")) == len(src_gold[s_id].split(" "))
                 src_str = src_gold[s_id]
-            
             write_attention_textfiles(sample_id, src_str, target_str, acc_attentions, args.root_directory)
-            
             wps_meter.update(src_tokens.size(0))
             t.log({'wps': round(wps_meter.avg)})
-            if s > 100:
-                break
 
 
 
