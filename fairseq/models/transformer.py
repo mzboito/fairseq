@@ -15,7 +15,7 @@ from fairseq import options
 from fairseq import utils
 
 from fairseq.modules import (
-    AdaptiveInput, AdaptiveSoftmax, CharacterTokenEmbedder, LearnedPositionalEmbedding, MultiheadAttention,
+    AdaptiveSoftmax, CharacterTokenEmbedder, LearnedPositionalEmbedding, MultiheadAttention,
     SinusoidalPositionalEmbedding
 )
 
@@ -178,8 +178,6 @@ class TransformerLanguageModel(FairseqLanguageModel):
                                  'Must be used with adaptive_loss criterion')
         parser.add_argument('--adaptive-softmax-dropout', type=float, metavar='D',
                             help='sets adaptive softmax dropout for the tail projections')
-        parser.add_argument('--adaptive-softmax-factor', type=float, metavar='N',
-                            help='adaptive input factor')
         parser.add_argument('--no-token-positional-embeddings', default=False, action='store_true',
                             help='if set, disables positional embeddings (outside self attention)')
         parser.add_argument('--share-decoder-input-output-embed', default=False, action='store_true',
@@ -193,18 +191,6 @@ class TransformerLanguageModel(FairseqLanguageModel):
                             help='size of character embeddings')
         parser.add_argument('--char-embedder-highway-layers', type=int, metavar='N', default=2,
                             help='number of highway layers for character token embeddder')
-        parser.add_argument('--adaptive-input', default=False, action='store_true',
-                            help='if set, uses adaptive input')
-        parser.add_argument('--adaptive-input-factor', type=float, metavar='N',
-                            help='adaptive input factor')
-        parser.add_argument('--adaptive-input-cutoff', metavar='EXPR',
-                            help='comma separated list of adaptive input cutoff points.')
-        parser.add_argument('--tie-adaptive-weights', action='store_true',
-                            help='if set, ties the weights of adaptive softmax and adaptive input')
-        parser.add_argument('--tie-adaptive-proj', action='store_true',
-                            help='if set, ties the projection weights of adaptive softmax and adaptive input')
-        parser.add_argument('--decoder-learned-pos', action='store_true',
-                            help='use learned positional embeddings in the decoder')
 
     @classmethod
     def build_model(cls, args, task):
@@ -212,10 +198,6 @@ class TransformerLanguageModel(FairseqLanguageModel):
 
         # make sure all arguments are present in older models
         base_lm_architecture(args)
-
-        if hasattr(args, 'no_tie_adaptive_proj') and args.no_tie_adaptive_proj == False:
-            # backward compatibility
-            args.tie_adaptive_proj = True
 
         if not hasattr(args, 'max_source_positions'):
             args.max_source_positions = args.tokens_per_sample
@@ -228,19 +210,8 @@ class TransformerLanguageModel(FairseqLanguageModel):
                                                   args.decoder_embed_dim,
                                                   args.char_embedder_highway_layers,
                                                   )
-        elif args.adaptive_input:
-            embed_tokens = AdaptiveInput(len(task.dictionary), task.dictionary.pad(), args.decoder_input_dim,
-                                         args.adaptive_input_factor, args.decoder_embed_dim,
-                                         options.eval_str_list(args.adaptive_input_cutoff, type=int))
         else:
             embed_tokens = Embedding(len(task.dictionary), args.decoder_input_dim, task.dictionary.pad())
-
-        if args.tie_adaptive_weights:
-            assert args.adaptive_input
-            assert args.adaptive_input_factor == args.adaptive_softmax_factor
-            assert args.adaptive_softmax_cutoff == args.adaptive_input_cutoff, '{} != {}'.format(
-                args.adaptive_softmax_cutoff, args.adaptive_input_cutoff)
-            assert args.decoder_input_dim == args.decoder_output_dim
 
         decoder = TransformerDecoder(args, task.output_dictionary, embed_tokens, no_encoder_attn=True, final_norm=False)
         return TransformerLanguageModel(decoder)
@@ -283,7 +254,7 @@ class TransformerEncoder(FairseqEncoder):
         self.register_buffer('version', torch.Tensor([2]))
         self.normalize = args.encoder_normalize_before
         if self.normalize:
-            self.layer_norm = LayerNorm(embed_dim)
+           self.layer_norm = LayerNorm(embed_dim)
 
     def forward(self, src_tokens, src_lengths):
         """
@@ -315,8 +286,16 @@ class TransformerEncoder(FairseqEncoder):
             encoder_padding_mask = None
 
         # encoder layers
+        weights_dict = dict()
+        weights_dict["TransformerEncoder"] = dict()
+        i=1
         for layer in self.layers:
-            x = layer(x, encoder_padding_mask)
+            #print("encoder layer " + str(i) + " self-attention")
+            x, weights = layer(x, encoder_padding_mask)
+            #print(weights)
+            weights_dict["TransformerEncoder"][i] = dict()
+            weights_dict["TransformerEncoder"][i]["SelfAttention"] = weights
+            i+=1
 
         if self.normalize:
             x = self.layer_norm(x)
@@ -324,7 +303,7 @@ class TransformerEncoder(FairseqEncoder):
         return {
             'encoder_out': x,  # T x B x C
             'encoder_padding_mask': encoder_padding_mask,  # B x T
-        }
+        }, weights_dict
 
     def reorder_encoder_out(self, encoder_out, new_order):
         """
@@ -395,9 +374,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.max_target_positions = args.max_target_positions
 
         self.embed_tokens = embed_tokens
-        self.embed_scale = math.sqrt(embed_dim)  # todo: try with input_embed_dim
+        self.embed_scale = math.sqrt(embed_dim) # todo: try with input_embed_dim
 
-        self.project_in_dim = Linear(input_embed_dim, embed_dim, bias=False) if embed_dim != input_embed_dim else None
+        self.project_in_dim = Linear(input_embed_dim, embed_dim, bias=False,
+                                     uniform=False) if embed_dim != input_embed_dim else None
 
         self.embed_positions = PositionalEmbedding(
             args.max_target_positions, embed_dim, padding_idx,
@@ -413,18 +393,14 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         self.adaptive_softmax = None
 
-        self.project_out_dim = Linear(embed_dim, output_embed_dim, bias=False) \
-            if embed_dim != output_embed_dim and not args.tie_adaptive_weights else None
+        self.project_out_dim = Linear(embed_dim, output_embed_dim,
+                              bias=False, uniform=False) if embed_dim != output_embed_dim else None
 
         if args.adaptive_softmax_cutoff is not None:
             self.adaptive_softmax = AdaptiveSoftmax(
-                len(dictionary),
-                output_embed_dim,
+                len(dictionary), output_embed_dim,
                 options.eval_str_list(args.adaptive_softmax_cutoff, type=int),
                 dropout=args.adaptive_softmax_dropout,
-                adaptive_inputs=embed_tokens if args.tie_adaptive_weights else None,
-                factor=args.adaptive_softmax_factor,
-                tie_proj=args.tie_adaptive_proj,
             )
         elif not self.share_input_output_embed:
             self.embed_out = nn.Parameter(torch.Tensor(len(dictionary), output_embed_dim))
@@ -432,7 +408,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.register_buffer('version', torch.Tensor([2]))
         self.normalize = args.decoder_normalize_before and final_norm
         if self.normalize:
-            self.layer_norm = LayerNorm(embed_dim)
+           self.layer_norm = LayerNorm(embed_dim)
 
     def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None):
         """
@@ -479,8 +455,12 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         inner_states = [x]
 
         # decoder layers
+        i = 1
+        decoder_dict = dict()
+        decoder_dict["TransformerDecoder"] = dict()
         for layer in self.layers:
-            x, attn = layer(
+            #print("layer " + str(i))
+            x, attn, decoder_layer_dict = layer(
                 x,
                 encoder_out['encoder_out'] if encoder_out is not None else None,
                 encoder_out['encoder_padding_mask'] if encoder_out is not None else None,
@@ -488,6 +468,11 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask=self.buffered_future_mask(x) if incremental_state is None else None,
             )
             inner_states.append(x)
+            decoder_dict["TransformerDecoder"][i] = decoder_layer_dict
+            
+            #print(attn)
+            #print()
+            i+=1
 
         if self.normalize:
             x = self.layer_norm(x)
@@ -505,7 +490,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             else:
                 x = F.linear(x, self.embed_out)
 
-        return x, {'attn': attn, 'inner_states': inner_states}
+        return (x, {'attn': attn, 'inner_states': inner_states}), decoder_dict
 
     def max_positions(self):
         """Maximum output length supported by the decoder."""
@@ -547,6 +532,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             self.layer_norm = None
             self.normalize = False
             state_dict['{}.version'.format(name)] = torch.Tensor([1])
+
 
         return state_dict
 
@@ -592,7 +578,7 @@ class TransformerEncoderLayer(nn.Module):
         """
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
-        x, _ = self.self_attn(query=x, key=x, value=x, key_padding_mask=encoder_padding_mask)
+        x, weights, not_averaged_weights = self.self_attn(query=x, key=x, value=x, key_padding_mask=encoder_padding_mask) # _ -> weights
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
@@ -605,7 +591,7 @@ class TransformerEncoderLayer(nn.Module):
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
-        return x
+        return x, (weights, not_averaged_weights) #added return second variable
 
     def maybe_layer_norm(self, i, x, before=False, after=False):
         assert before ^ after
@@ -680,27 +666,34 @@ class TransformerDecoderLayer(nn.Module):
         """
         residual = x
         x = self.maybe_layer_norm(self.self_attn_layer_norm, x, before=True)
+        
         if prev_self_attn_state is not None:
             if incremental_state is None:
                 incremental_state = {}
             prev_key, prev_value = prev_self_attn_state
             saved_state = {"prev_key": prev_key, "prev_value": prev_value}
             self.self_attn._set_input_buffer(incremental_state, saved_state)
-        x, _ = self.self_attn(
+        #! multihead call, but weights are none
+        x, weights, not_averaged_weights = self.self_attn(
             query=x,
             key=x,
             value=x,
             key_padding_mask=self_attn_padding_mask,
             incremental_state=incremental_state,
-            need_weights=False,
+            need_weights=True, #False,
             attn_mask=self_attn_mask,
         )
+        decoder_dict = dict()
+        decoder_dict["SelfAttention"] = (weights, not_averaged_weights)
+        #print("decoder self-attention")
+        #print(weights)
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(self.self_attn_layer_norm, x, after=True)
 
         attn = None
         if self.encoder_attn is not None:
+            #print("encoder decoder attention")
             residual = x
             x = self.maybe_layer_norm(self.encoder_attn_layer_norm, x, before=True)
             if prev_attn_state is not None:
@@ -709,7 +702,7 @@ class TransformerDecoderLayer(nn.Module):
                 prev_key, prev_value = prev_attn_state
                 saved_state = {"prev_key": prev_key, "prev_value": prev_value}
                 self.encoder_attn._set_input_buffer(incremental_state, saved_state)
-            x, attn = self.encoder_attn(
+            x, attn, not_averaged_attn = self.encoder_attn(
                 query=x,
                 key=encoder_out,
                 value=encoder_out,
@@ -718,6 +711,8 @@ class TransformerDecoderLayer(nn.Module):
                 static_kv=True,
                 need_weights=(not self.training and self.need_attn),
             )
+            decoder_dict["EncoderDecoderAttention"] = (attn, not_averaged_attn)
+            #print(attn)
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = residual + x
             x = self.maybe_layer_norm(self.encoder_attn_layer_norm, x, after=True)
@@ -734,7 +729,7 @@ class TransformerDecoderLayer(nn.Module):
             saved_state = self.self_attn._get_input_buffer(incremental_state)
             self_attn_state = saved_state["prev_key"], saved_state["prev_value"]
             return x, attn, self_attn_state
-        return x, attn
+        return x, attn, decoder_dict
 
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):
         assert before ^ after
@@ -759,9 +754,12 @@ def LayerNorm(embedding_dim):
     return m
 
 
-def Linear(in_features, out_features, bias=True):
+def Linear(in_features, out_features, bias=True, uniform=True):
     m = nn.Linear(in_features, out_features, bias)
-    nn.init.xavier_uniform_(m.weight)
+    if uniform:
+        nn.init.xavier_uniform_(m.weight)
+    else:
+        nn.init.xavier_normal_(m.weight)
     if bias:
         nn.init.constant_(m.bias, 0.)
     return m
@@ -785,7 +783,6 @@ def base_lm_architecture(args):
     args.decoder_attention_heads = getattr(args, 'decoder_attention_heads', 8)
     args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', None)
     args.adaptive_softmax_dropout = getattr(args, 'adaptive_softmax_dropout', 0)
-    args.adaptive_softmax_factor = getattr(args, 'adaptive_softmax_factor', 4)
     args.decoder_learned_pos = getattr(args, 'decoder_learned_pos', False)
 
     args.character_embeddings = getattr(args, 'character_embeddings', False)
@@ -795,14 +792,6 @@ def base_lm_architecture(args):
 
     # The model training is not stable without this
     args.decoder_normalize_before = True
-
-    args.adaptive_input = getattr(args, 'adaptive_input', False)
-    args.adaptive_input_factor = getattr(args, 'adaptive_input_factor', 4)
-    args.adaptive_input_cutoff = getattr(args, 'adaptive_input_cutoff', None)
-
-    args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', False)
-    args.tie_adaptive_proj = getattr(args, 'tie_adaptive_proj', False)
-
 
 @register_model_architecture('transformer_lm', 'transformer_lm_big')
 def transformer_lm_big(args):

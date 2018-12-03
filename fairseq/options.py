@@ -34,6 +34,13 @@ def get_generation_parser(interactive=False, default_task='translation'):
         add_interactive_args(parser)
     return parser
 
+def get_matrices_generator_parser(interactive=False, default_task='translation'):
+    parser = get_parser('Generation', default_task)
+    add_dataset_args(parser, gen=True)
+    add_attention_args(parser)
+    add_generation_args(parser)
+    return parser
+
 
 def get_interactive_generation_parser(default_task='translation'):
     return get_generation_parser(interactive=True, default_task=default_task)
@@ -130,8 +137,6 @@ def get_parser(desc, default_task='translation'):
     parser.add_argument('--fp16', action='store_true', help='use FP16')
     parser.add_argument('--fp16-init-scale', default=2**7, type=int,
                         help='default FP16 loss scale')
-    parser.add_argument('--fp16-scale-window', type=int,
-                        help='number of updates before increasing loss scale')
 
     # Task definitions can be found under fairseq/tasks/
     parser.add_argument(
@@ -142,6 +147,10 @@ def get_parser(desc, default_task='translation'):
 
     return parser
 
+def add_attention_args(parser):
+    group = parser.add_argument_group('Attention Matrices Extraction')
+    group.add_argument('--root-directory',type=str,help="root directory for attention matrices")
+    return group
 
 def add_dataset_args(parser, train=False, gen=False):
     group = parser.add_argument_group('Dataset and data loading')
@@ -274,8 +283,6 @@ def add_common_eval_args(group):
     group.add_argument('--cpu', action='store_true', help='generate on CPU')
     group.add_argument('--quiet', action='store_true',
                        help='only print final scores')
-    group.add_argument('--model-overrides', default="{}", type=str, metavar='DICT',
-                       help='a dictionary used to override model args at generation that were used during model training')
 
 
 def add_eval_lm_args(parser):
@@ -332,6 +339,8 @@ def add_generation_args(parser):
                        help='strength of diversity penalty for Diverse Beam Search')
     group.add_argument('--print-alignment', action='store_true',
                        help='if set, uses attention feedback to compute and print alignment to source tokens')
+    group.add_argument('--model-overrides', default="{}", type=str, metavar='DICT',
+                       help='a dictionary used to override model args at generation that were used during model training')
     return group
 
 
