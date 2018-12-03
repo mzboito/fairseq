@@ -4,14 +4,12 @@
 # This source code is licensed under the license found in the LICENSE file in
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
-from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from . import FairseqDecoder, FairseqEncoder
-from fairseq.data import Dictionary
 
 
 class BaseFairseqModel(nn.Module):
@@ -101,12 +99,8 @@ class BaseFairseqModel(nn.Module):
 
         self.apply(apply_remove_weight_norm)
 
-        seen = set()
-
         def apply_make_generation_fast_(module):
-            if module != self and hasattr(module, 'make_generation_fast_') \
-                    and module not in seen:
-                seen.add(module)
+            if module != self and hasattr(module, 'make_generation_fast_'):
                 module.make_generation_fast_(**kwargs)
 
         self.apply(apply_make_generation_fast_)
@@ -121,12 +115,8 @@ class BaseFairseqModel(nn.Module):
 
     def prepare_for_onnx_export_(self, **kwargs):
         """Make model exportable via ONNX trace."""
-        seen = set()
-
         def apply_prepare_for_onnx_export_(module):
-            if module != self and hasattr(module, 'prepare_for_onnx_export_') \
-                    and module not in seen:
-                seen.add(module)
+            if module != self and hasattr(module, 'prepare_for_onnx_export_'):
                 module.prepare_for_onnx_export_(**kwargs)
 
         self.apply(apply_prepare_for_onnx_export_)
@@ -169,9 +159,9 @@ class FairseqModel(BaseFairseqModel):
         Returns:
             the decoder's output, typically of shape `(batch, tgt_len, vocab)`
         """
-        encoder_out = self.encoder(src_tokens, src_lengths)
-        decoder_out = self.decoder(prev_output_tokens, encoder_out)
-        return decoder_out
+        encoder_out, encoder_attention = self.encoder(src_tokens, src_lengths)
+        decoder_out, decoder_attention = self.decoder(prev_output_tokens, encoder_out)
+        return decoder_out, (encoder_attention, decoder_attention)
 
     def max_positions(self):
         """Maximum length supported by the model."""
@@ -192,38 +182,6 @@ class FairseqMultiModel(BaseFairseqModel):
             key: FairseqModel(encoders[key], decoders[key])
             for key in self.keys
         })
-
-    @staticmethod
-    def build_shared_embeddings(
-        dicts: Dict[str, Dictionary],
-        langs: List[str],
-        embed_dim: int,
-        build_embedding: callable,
-        pretrained_embed_path: Optional[str] = None,
-    ):
-        """
-        Helper function to build shared embeddings for a set of languages after
-        checking that all dicts corresponding to those languages are equivalent.
-
-        Args:
-            dicts: Dict of lang_id to its corresponding Dictionary
-            langs: languages that we want to share embeddings for
-            embed_dim: embedding dimension
-            build_embedding: callable function to actually build the embedding
-            pretrained_embed_path: Optional path to load pretrained embeddings
-        """
-        shared_dict = dicts[langs[0]]
-        if any(dicts[lang] != shared_dict for lang in langs):
-            raise ValueError(
-                '--share-*-embeddings requires a joined dictionary: '
-                '--share-encoder-embeddings requires a joined source '
-                'dictionary, --share-decoder-embeddings requires a joined '
-                'target dictionary, and --share-all-embeddings requires a '
-                'joint source + target dictionary.'
-            )
-        return build_embedding(
-            shared_dict, embed_dim, pretrained_embed_path
-        )
 
     def forward(self, src_tokens, src_lengths, prev_output_tokens):
         decoder_outs = {}
@@ -287,7 +245,3 @@ class FairseqLanguageModel(BaseFairseqModel):
     @property
     def supported_targets(self):
         return {'future'}
-
-    def remove_head(self):
-        """Removes the head of the model (e.g. the softmax layer) to conserve space when it is not needed"""
-        raise NotImplementedError()

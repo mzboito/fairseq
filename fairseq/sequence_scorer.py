@@ -28,7 +28,7 @@ class SequenceScorer(object):
             s = utils.move_to_cuda(sample) if cuda else sample
             if timer is not None:
                 timer.start()
-            pos_scores, attn = self.score(s)
+            pos_scores, attn, acc_attentions = self.score(s)
             for i, id in enumerate(s['id'].data):
                 # remove padding from ref
                 src = utils.strip_pad(s['net_input']['src_tokens'].data[i, :], self.pad)
@@ -51,7 +51,7 @@ class SequenceScorer(object):
                 if timer is not None:
                     timer.stop(s['ntokens'])
                 # return results in the same format as SequenceGenerator
-                yield id, src, ref, hypos
+                yield id, src, ref, hypos, acc_attentions
 
     def score(self, sample):
         """Score a batch of translations."""
@@ -62,11 +62,10 @@ class SequenceScorer(object):
         avg_attn = None
         for model in self.models:
             with torch.no_grad():
-                model.eval()
-                decoder_out = model.forward(**net_input)
-                attn = decoder_out[1]
-
-            probs = model.get_normalized_probs(decoder_out, log_probs=len(self.models) == 1, sample=sample).data
+                model.eval() #TransformerModel
+                decoder_out, acc_attentions = model.forward(**net_input)
+                attn = decoder_out[1]['attn'] #attn = decoder_out[1] original
+            probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=sample).data
             if avg_probs is None:
                 avg_probs = probs
             else:
@@ -77,14 +76,12 @@ class SequenceScorer(object):
                     avg_attn = attn
                 else:
                     avg_attn.add_(attn)
-        if len(self.models) > 1:
-            avg_probs.div_(len(self.models))
-            avg_probs.log_()
-            if avg_attn is not None:
-                avg_attn.div_(len(self.models))
+        avg_probs.div_(len(self.models))
+        avg_probs.log_()
+        if avg_attn is not None:
+            avg_attn.div_(len(self.models))
         avg_probs = avg_probs.gather(
             dim=2,
             index=sample['target'].data.unsqueeze(-1),
         )
-        return avg_probs.squeeze(2), avg_attn
-
+        return avg_probs.squeeze(2), avg_attn, acc_attentions

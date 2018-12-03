@@ -150,6 +150,7 @@ def get_parser(desc, default_task='translation'):
 def add_attention_args(parser):
     group = parser.add_argument_group('Attention Matrices Extraction')
     group.add_argument('--root-directory',type=str,help="root directory for attention matrices")
+    group.add_argument('--gold-target',type=str,help="aligned gold translation")
     return group
 
 def add_dataset_args(parser, train=False, gen=False):

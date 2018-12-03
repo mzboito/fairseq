@@ -18,9 +18,6 @@ import numpy as np
 import codecs
 
 def write_attention_textfiles(s_id, src_sentence, trg_sentence, att_dictionary, root_directory):
-    #print(s_id)
-    #print(src_sentence)
-    #print(trg_sentence)
     encoder = att_dictionary[0]
     decoder = att_dictionary[1]
     for coder_dict in [encoder, decoder]:
@@ -50,8 +47,6 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
 def write_attention_matrices(src_sentence, trg_sentence, matrix, path):
     src = [""] + src_sentence.split(" ") + ["</S>"]
     trg = trg_sentence.split(" ") + ["</S>"]
-    #matrix = matrix[0] if len(matrix) == 1 else matrix
-    
     avg = matrix[0][0]
     heads = matrix[1][0] #the last [0] is only to remove an empty dimension
     write_matrix(src, trg, avg, path + "_avg")
@@ -155,7 +150,7 @@ def main(args):
     #has_target = True
     s = 0
     check_root(args.root_directory)
-    src_gold = read_gold(args.root_directory + "/corpus.gold")
+    src_gold = read_gold(args.gold_target)
 
     with progress_bar.build_progress_bar(args, itr) as t: #creates a progress bar, life goes on
         translations = translator.score_batched_itr(t, cuda=use_cuda, timer=gen_timer)
