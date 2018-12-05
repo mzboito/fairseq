@@ -87,6 +87,8 @@ def main(args):
     args.replace_unk = True
     ####2 LOAD DATASET IN THE RIGHT FORMAT
     task = tasks.setup_task(args)
+    #print(args.gen_subset)
+    #sys.exit(1)
     task.load_dataset(args.gen_subset)
     print('| {} {} {} examples'.format(args.data, args.gen_subset, len(task.dataset(args.gen_subset))))
     # Set dictionaries
@@ -123,10 +125,10 @@ def main(args):
     ####5 INIT GENERATOR
     gen_timer = StopwatchMeter()
     translator = SequenceScorer(models, task.target_dictionary)
-  
+
     ####6 SCORING
     check_root(args.root_directory)
-    src_gold = read_gold(args.gold_target)
+    src_gold = read_gold(args.gold_source)
     with progress_bar.build_progress_bar(args, itr) as t: #creates a progress bar, life goes on
         translations = translator.score_batched_itr(t, cuda=False, timer=gen_timer)
         '''translations: <class 'generator'>
@@ -134,7 +136,8 @@ def main(args):
         wps_meter = TimeMeter()
         for sample_id, src_tokens, target_tokens, hypos, acc_attentions in translations:
             src_str = src_dict.string(src_tokens)
-            target_str = tgt_dict.string(target_tokens, args.remove_bpe, escape_unk=True)
+            print(src_str)
+            target_str = tgt_dict.string(target_tokens)#, args.remove_bpe, escape_unk=True)
             if "unk" in src_str:
                 s_id = sample_id.item()
                 assert len(src_str.split(" ")) == len(src_gold[s_id].split(" "))
@@ -146,6 +149,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = options.get_matrices_generator_parser()#get_generation_parser()
+    parser = options.get_matrices_generator_parser()
     args = options.parse_args_and_arch(parser)
     main(args)
