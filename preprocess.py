@@ -45,6 +45,10 @@ def get_parser():
         help="comma separated, test file prefixes",
     )
     parser.add_argument(
+        "--vocabpref",
+        help="file for vocabulary generation",
+    )
+    parser.add_argument(
         "--destdir", metavar="DIR", default="data-bin", help="destination dir"
     )
     parser.add_argument(
@@ -114,6 +118,9 @@ def main(args):
     os.makedirs(args.destdir, exist_ok=True)
     target = not args.only_source
 
+    def vocab_path(lang):
+        return "{}{}".format(args.vocabpref, ("." + lang) if lang else "")
+
     def train_path(lang):
         return "{}{}".format(args.trainpref, ("." + lang) if lang else "")
 
@@ -129,32 +136,57 @@ def main(args):
     def dict_path(lang):
         return dest_path("dict", lang) + ".txt"
 
+    '''print(args.joined_dictionary)
+    print(args.vocabpref)
+    print(args.source_lang)
+    #print(len(build_dictionary([vocab_path(args.source_lang)], args.workers)))
+    print(len(build_dictionary([train_path(args.source_lang)], args.workers)))'''
     if args.joined_dictionary:
         assert not args.srcdict, "cannot combine --srcdict and --joined-dictionary"
         assert not args.tgtdict, "cannot combine --tgtdict and --joined-dictionary"
-        src_dict = build_dictionary(
-            {train_path(lang) for lang in [args.source_lang, args.target_lang]},
-            args.workers,
-        )
+        if args.vocabpref:
+            src_dict = build_dictionary(
+                {vocab_path(lang) for lang in [args.source_lang, args.target_lang]},
+                args.workers,
+            )
+        else:
+            src_dict = build_dictionary(
+                {train_path(lang) for lang in [args.source_lang, args.target_lang]},
+                args.workers,
+            )
         tgt_dict = src_dict
     else:
         if args.srcdict:
             src_dict = dictionary.Dictionary.load(args.srcdict)
         else:
-            assert (
-                args.trainpref
-            ), "--trainpref must be set if --srcdict is not specified"
-            src_dict = build_dictionary([train_path(args.source_lang)], args.workers)
+            if args.vocabpref:
+                assert (
+                    args.trainpref
+                ), "--trainpref must be set if --srcdict is not specified"
+                src_dict = build_dictionary([vocab_path(args.source_lang)], args.workers)
+            else:
+                assert (
+                    args.trainpref
+                ), "--trainpref must be set if --srcdict is not specified"
+                src_dict = build_dictionary([train_path(args.source_lang)], args.workers)
         if target:
             if args.tgtdict:
                 tgt_dict = dictionary.Dictionary.load(args.tgtdict)
             else:
-                assert (
-                    args.trainpref
-                ), "--trainpref must be set if --tgtdict is not specified"
-                tgt_dict = build_dictionary(
-                    [train_path(args.target_lang)], args.workers
-                )
+                if args.vocabpref:
+                    assert (
+                        args.trainpref
+                    ), "--trainpref must be set if --tgtdict is not specified"
+                    tgt_dict = build_dictionary(
+                        [vocab_path(args.target_lang)], args.workers
+                    )
+                else:
+                    assert (
+                        args.trainpref
+                    ), "--trainpref must be set if --tgtdict is not specified"
+                    tgt_dict = build_dictionary(
+                        [train_path(args.target_lang)], args.workers
+                    )
 
     src_dict.finalize(
         threshold=args.thresholdsrc,
@@ -319,13 +351,11 @@ def build_and_save_dictionary(
     dict.save(dict_path)
     return dict_path
 
-
 def build_dictionary(filenames, workers):
     d = dictionary.Dictionary()
     for filename in filenames:
         Tokenizer.add_file_to_dictionary(filename, d, tokenize_line, workers)
     return d
-
 
 def binarize(args, filename, dict, output_prefix, lang, offset, end):
     ds = indexed_dataset.IndexedDatasetBuilder(
@@ -339,12 +369,10 @@ def binarize(args, filename, dict, output_prefix, lang, offset, end):
     ds.finalize(dataset_dest_file(args, output_prefix, lang, "idx"))
     return res
 
-
 def binarize_with_load(args, filename, dict_path, output_prefix, lang, offset, end):
     dict = dictionary.Dictionary.load(dict_path)
     binarize(args, filename, dict, output_prefix, lang, offset, end)
     return dataset_dest_prefix(args, output_prefix, lang)
-
 
 def dataset_dest_prefix(args, output_prefix, lang):
     base = f"{args.destdir}/{output_prefix}"
@@ -353,15 +381,12 @@ def dataset_dest_prefix(args, output_prefix, lang):
     )
     return f"{base}{lang_part}"
 
-
 def dataset_dest_file(args, output_prefix, lang, extension):
     base = dataset_dest_prefix(args, output_prefix, lang)
     return f"{base}.{extension}"
 
-
 def get_offsets(input_file, num_workers):
     return Tokenizer.find_offsets(input_file, num_workers)
-
 
 def merge_files(files, outpath):
     ds = indexed_dataset.IndexedDatasetBuilder("{}.bin".format(outpath))
@@ -370,7 +395,6 @@ def merge_files(files, outpath):
         os.remove(indexed_dataset.data_file_path(file))
         os.remove(indexed_dataset.index_file_path(file))
     ds.finalize("{}.idx".format(outpath))
-
 
 if __name__ == "__main__":
     parser = get_parser()
