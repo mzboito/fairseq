@@ -191,6 +191,7 @@ class MultiheadAttention(nn.Module):
             avg_attn_weights = attn_weights.sum(dim=1) / self.num_heads
         else:
             attn_weights = None
+            avg_attn_weights = None
 
         return attn, avg_attn_weights, attn_weights
 
