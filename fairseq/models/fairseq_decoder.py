@@ -40,8 +40,10 @@ class FairseqDecoder(nn.Module):
             assert sample is not None and 'target' in sample
             out = self.adaptive_softmax.get_log_prob(net_output[0], sample['target'])
             return out.exp_() if not log_probs else out
-
-        logits = net_output[0].float()
+        try:
+            logits = net_output[0].float()
+        except AttributeError:
+            logits = net_output[0][0].float()
         if log_probs:
             return F.log_softmax(logits, dim=-1)
         else:

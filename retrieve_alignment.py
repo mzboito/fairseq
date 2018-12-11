@@ -34,7 +34,7 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
         for att_type in list(coder_dict[layer]):
             sub_dir = "/".join([root, att_type]) 
             check_root(sub_dir)
-            file_name = "/".join([sub_dir, str(s_id.item())])
+            file_name = "/".join([sub_dir, str(s_id)])
             if att_type == "SelfAttention":
                 if is_encoder:
                     write_attention_matrices(src_sentence, src_sentence, coder_dict[layer][att_type], file_name)
@@ -45,12 +45,12 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
 
 def write_attention_matrices(src_sentence, trg_sentence, matrix, path):
     src = [""] + src_sentence.split(" ") + ["</S>"]
-    trg = trg_sentence.split(" ") + ["</S>"]
+    trg = ["<S>"] + trg_sentence.split(" ") 
     avg = matrix[0][0]
     heads = matrix[1][0] #the last [0] is only to remove an empty dimension
     write_matrix(src, trg, avg, path + "_avg")
     for i in range(len(heads)):
-        write_matrix(src, trg, heads[i], path + "_head" + str(i))
+        write_matrix(src, trg, heads[i], path + "_head" + str(i+1))
 
 def write_matrix(src_sentence, trg_sentence, matrix, path):
     with codecs.open(path + ".txt", "w", "utf-8") as output_matrix:
@@ -73,6 +73,17 @@ def check_root(root_directory):
 
 def read_gold(f_path):
     return [line.strip("\n") for line in codecs.open(f_path)]
+
+def assert_unk(sentence, gold_vocab, key):
+    if "unk" in sentence:
+        if gold_vocab:
+            assert len(sentence.split(" ")) == len(gold_vocab.split(" "))
+            return gold_vocab
+        else:
+            print("UNK word on {} sentence".format(key))
+            print("Use aligned gold transcription to avoid UNK errors by using --gold-{}".fomat(key))
+            sys.exit(1)
+            
 
 def main(args):
     ####1 ARGS SETTING
@@ -128,24 +139,26 @@ def main(args):
 
     ####6 SCORING
     check_root(args.root_directory)
-    src_gold = read_gold(args.gold_source)
+    if args.gold_source:
+        src_gold = read_gold(args.gold_source)
+    if args.gold_target:
+        trg_gold = read_gold(args.gold_target)
     with progress_bar.build_progress_bar(args, itr) as t: #creates a progress bar, life goes on
         translations = translator.score_batched_itr(t, cuda=False, timer=gen_timer)
         '''translations: <class 'generator'>
         just defines the generator,does not calculate stuff right here'''
         wps_meter = TimeMeter()
-        for sample_id, src_tokens, target_tokens, hypos, acc_attentions in translations:
+        for sample_id, src_tokens, target_tokens, _, acc_attentions in translations:
             src_str = src_dict.string(src_tokens)
-            print(src_str)
             target_str = tgt_dict.string(target_tokens)#, args.remove_bpe, escape_unk=True)
-            if "unk" in src_str:
-                s_id = sample_id.item()
-                assert len(src_str.split(" ")) == len(src_gold[s_id].split(" "))
-                src_str = src_gold[s_id]
-            write_attention_textfiles(sample_id, src_str, target_str, acc_attentions, args.root_directory)
+
+            s_id = sample_id.item()
+            assert_unk(src_str, src_gold[s_id] if args.gold_source else None, "source")
+            assert_unk(target_str, trg_gold[s_id] if args.gold_target else None, "target")
+         
+            write_attention_textfiles(s_id, src_str, target_str, acc_attentions, args.root_directory)
             wps_meter.update(src_tokens.size(0))
             t.log({'wps': round(wps_meter.avg)})
-
 
 
 if __name__ == '__main__':

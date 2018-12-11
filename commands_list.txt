@@ -1,13 +1,9 @@
 * preprocessing
 
-python preprocess.py --source-lang gold --target-lang mb --trainpref ~/NMT_experiments/MBOSHI/files/train --validpref ~/NMT_experiments/MBOSHI/files/dev --testpref ~/NMT_experiments/MBOSHI/files/corpus --destdir data-bin/mboshi2grapheme
-
-python preprocess.py --source-lang fr --target-lang ph --trainpref ~/Interspeech_models/temp10_same/true_phones/files/train --validpref ~/Interspeech_models/temp10_same/true_phones/files/dev --testpref ~/Interspeech_models/temp10_same/true_phones/files/corpus --destdir data-bin/french2truephones
-
-python preprocess.py --source-lang fr --target-lang ph --trainpref ~/Interspeech_models/temp10_same/mfcc_hmm/files/train --validpref ~/Interspeech_models/temp10_same/mfcc_hmm/files/dev --testpref ~/Interspeech_models/temp10_same/mfcc_hmm/files/corpus --destdir data-bin/french2mfcchmm
+python preprocess.py --source-lang gold --target-lang mb --trainpref ~/NMT_experiments/MBOSHI/files/train --validpref ~/NMT_experiments/MBOSHI/files/dev --testpref ~/NMT_experiments/MBOSHI/files/corpus --vocabpref ~/NMT_experiments/MBOSHI/files/corpus --destdir data-bin/mboshi2graphemes
 
 * training
-CUDA_VISIBLE_DEVICES=0 nohup python train.py data-bin/mboshi2grapheme --arch transformer -s gold -t mb \
+CUDA_VISIBLE_DEVICES=0 nohup python train.py data-bin/mboshi2graphemes --arch transformer -s gold -t mb \
 --dropout 0.5 --encoder-embed-dim 64 --encoder-ffn-embed-dim 64 --encoder-layers 3 --encoder-attention-heads 1 \
 --decoder-embed-dim 64 --decoder-ffn-embed-dim 64 --decoder-layers 3 --decoder-attention-heads 1 \
 --optimizer adam --lr 0.0005 --label-smoothing 0.1 --max-tokens 2000 --min-lr '1e-09' \
