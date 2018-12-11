@@ -40,8 +40,10 @@ class FairseqDecoder(nn.Module):
             assert sample is not None and 'target' in sample
             out = self.adaptive_softmax.get_log_prob(net_output[0], sample['target'])
             return out.exp_() if not log_probs else out
-
-        logits = net_output[0].float()
+        try:
+            logits = net_output[0].float()
+        except AttributeError:
+            logits = net_output[0][0].float()
         if log_probs:
             return F.log_softmax(logits, dim=-1)
         else:
@@ -54,3 +56,4 @@ class FairseqDecoder(nn.Module):
     def upgrade_state_dict(self, state_dict):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""
         return state_dict
+
