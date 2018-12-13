@@ -56,3 +56,4 @@ class FairseqDecoder(nn.Module):
     def upgrade_state_dict(self, state_dict):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""
         return state_dict
+
