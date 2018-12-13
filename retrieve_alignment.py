@@ -34,7 +34,7 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
         for att_type in list(coder_dict[layer]):
             sub_dir = "/".join([root, att_type]) 
             check_root(sub_dir)
-            file_name = "/".join([sub_dir, str(s_id)])
+            file_name = "/".join([sub_dir, str(s_id+1)])
             if att_type == "SelfAttention":
                 if is_encoder:
                     write_attention_matrices(src_sentence, src_sentence, coder_dict[layer][att_type], file_name)
