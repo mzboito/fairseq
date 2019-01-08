@@ -490,7 +490,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             else:
                 x = F.linear(x, self.embed_out)
 
-        return (x, {'attn': attn, 'inner_states': inner_states}), decoder_dict
+        return (x, {'attn': attn, 'inner_states': inner_states}), decoder_dict 
 
     def max_positions(self):
         """Maximum output length supported by the decoder."""
@@ -578,7 +578,7 @@ class TransformerEncoderLayer(nn.Module):
         """
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
-        x, weights, not_averaged_weights = self.self_attn(query=x, key=x, value=x, key_padding_mask=encoder_padding_mask) # _ -> weights
+        x, weights, raw_attn = self.self_attn(query=x, key=x, value=x, key_padding_mask=encoder_padding_mask) # _ -> weights
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
@@ -591,7 +591,7 @@ class TransformerEncoderLayer(nn.Module):
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
-        return x, (weights, not_averaged_weights) #added return second variable
+        return x, (x, weights, raw_attn) #added return second variable
 
     def maybe_layer_norm(self, i, x, before=False, after=False):
         assert before ^ after
@@ -674,7 +674,7 @@ class TransformerDecoderLayer(nn.Module):
             saved_state = {"prev_key": prev_key, "prev_value": prev_value}
             self.self_attn._set_input_buffer(incremental_state, saved_state)
         #! multihead call, but weights are none
-        x, weights, not_averaged_weights = self.self_attn(
+        x, weights, raw_weights = self.self_attn(
             query=x,
             key=x,
             value=x,
@@ -684,7 +684,7 @@ class TransformerDecoderLayer(nn.Module):
             attn_mask=self_attn_mask,
         )
         decoder_dict = dict()
-        decoder_dict["SelfAttention"] = (weights, not_averaged_weights)
+        decoder_dict["SelfAttention"] = (x, weights, raw_weights)
         #print("decoder self-attention")
         #print(weights)
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -702,7 +702,7 @@ class TransformerDecoderLayer(nn.Module):
                 prev_key, prev_value = prev_attn_state
                 saved_state = {"prev_key": prev_key, "prev_value": prev_value}
                 self.encoder_attn._set_input_buffer(incremental_state, saved_state)
-            x, attn, not_averaged_attn = self.encoder_attn(
+            x, attn, raw_attn = self.encoder_attn(
                 query=x,
                 key=encoder_out,
                 value=encoder_out,
@@ -711,7 +711,7 @@ class TransformerDecoderLayer(nn.Module):
                 static_kv=True,
                 need_weights=(not self.training and self.need_attn),
             )
-            decoder_dict["EncoderDecoderAttention"] = (attn, not_averaged_attn)
+            decoder_dict["EncoderDecoderAttention"] = (x, attn, raw_attn)
             #print(attn)
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = residual + x

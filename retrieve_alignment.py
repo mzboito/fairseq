@@ -18,25 +18,30 @@ import numpy as np
 import codecs
 
 def write_attention_textfiles(s_id, src_sentence, trg_sentence, att_dictionary, root_directory):
+    '''
     encoder = att_dictionary[0]
     decoder = att_dictionary[1]
-    for coder_dict in [encoder, decoder]:
-        name = list(coder_dict)[0] #if it is (en|de)coder
+    '''
+    for coder_dict in att_dictionary:
+        name = list(coder_dict)[0] 
         root_dir = "/".join([root_directory,name])
         check_root(root_dir)
-        is_encoder = True if "Encoder" in name else False
+        is_encoder = "Encoder" in name
         write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict[name], is_encoder, root_dir)
 
 def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_encoder, root_directory):
+    '''
+    coder_dict made of layers and attention types
+    '''
     for layer in coder_dict:
         root = "/".join([root_directory, str(layer)])
         check_root(root)
         for att_type in list(coder_dict[layer]):
             sub_dir = "/".join([root, att_type]) 
             check_root(sub_dir)
-            file_name = "/".join([sub_dir, str(s_id+1)])
+            file_name = "/".join([sub_dir, str(s_id+1)]) #generate file name prefix
             if att_type == "SelfAttention":
-                if is_encoder:
+                if is_encoder: #target and source for the matrix are the same
                     write_attention_matrices(src_sentence, src_sentence, coder_dict[layer][att_type], file_name)
                 else:
                     write_attention_matrices(trg_sentence, trg_sentence, coder_dict[layer][att_type], file_name)
@@ -46,9 +51,12 @@ def write_coder_attentions(s_id, src_sentence, trg_sentence, coder_dict, is_enco
 def write_attention_matrices(src_sentence, trg_sentence, matrix, path):
     src = [""] + src_sentence.split(" ") + ["</S>"]
     trg = ["<S>"] + trg_sentence.split(" ") 
-    avg = matrix[0][0]
-    heads = matrix[1][0] #the last [0] is only to remove an empty dimension
+    multihead_out = matrix[0][0] #output
+    avg = matrix[1][0] #average
+    heads = matrix[2][0] #heads  
+    #the last [0] is only to remove an empty dimension
     write_matrix(src, trg, avg, path + "_avg")
+    write_matrix(src, trg, multihead_out, path + "_output")
     for i in range(len(heads)):
         write_matrix(src, trg, heads[i], path + "_head" + str(i+1))
 
@@ -84,7 +92,6 @@ def assert_unk(sentence, gold_vocab, key):
             print("Use aligned gold transcription to avoid UNK errors by using --gold-{}".fomat(key))
             sys.exit(1)
             
-
 def main(args):
     ####1 ARGS SETTING
     assert args.path is not None, '--path required for generation!'
